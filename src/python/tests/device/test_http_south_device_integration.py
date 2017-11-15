@@ -17,7 +17,6 @@ __version__ = "${VERSION}"
 BASE_URL = 'http://localhost:6683/sensor-reading'
 headers = {"Content-Type": 'application/json'}
 
-@pytest.allure.feature("unit")
 @pytest.allure.story("device")
 class TestIngestReadings(object):
     """Unit tests for foglamp.device.coap.IngestReadings
