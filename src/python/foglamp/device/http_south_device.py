@@ -165,6 +165,9 @@ class HttpSouthIngest(object):
                 except KeyError:
                     readings = payload.get('sensor_values')  # sensor_values is deprecated
 
+                if not isinstance(readings, dict):
+                    raise ValueError('readings must be a dictionary')
+
                 await Ingest.add_readings(asset=asset, timestamp=timestamp, key=key, readings=readings)
         except (ValueError, TypeError) as e:
             increment_discarded_counter = True
