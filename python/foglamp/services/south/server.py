@@ -153,11 +153,11 @@ class Server(FoglampMicroservice):
     async def _exec_plugin_async(self, config) -> None:
         """Executes async type plugin  """
 
-        self._plugin.plugin_start(self._plugin_handle)
-
         await Ingest.start(self._core_management_host, self._core_management_port)
 
-    
+        self._plugin.plugin_start(self._plugin_handle)
+
+
     async def _exec_plugin_poll(self, config) -> None:
         """Executes poll type plugin """
 

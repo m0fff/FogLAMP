@@ -814,7 +814,10 @@ DELETE FROM foglamp.roles;
 DELETE FROM foglamp.resources;
 
 INSERT INTO foglamp.configuration ( key, description, value )
-    VALUES ( 'CC2650POLL', 'SensorTagCC2650 Plugin Configuration', ' { "plugin" : { "type" : "string", "value" : "cc2650poll", "default" : "cc2650poll", "description" : "Python module name of the plugin to load" } } ');
+    VALUES ( 'CC2650POLL', 'SensorTagCC2650 Polling Plugin Configuration', ' { "plugin" : { "type" : "string", "value" : "cc2650poll", "default" : "cc2650poll", "description" : "Python module name of the plugin to load" } } ');
+
+INSERT INTO foglamp.configuration ( key, description, value )
+    VALUES ( 'CC2650ASYN', 'SensorTagCC2650 Async Plugin Configuration', ' { "plugin" : { "type" : "string", "value" : "cc2650async", "default" : "cc2650async", "description" : "Python module name of the plugin to load" } } ');
 
 -- DELETE data for roles, resources and permissions
 DELETE FROM foglamp.role_resource_permission;
@@ -858,6 +861,7 @@ insert into foglamp.scheduled_processes ( name, script ) values ( 'COAP', '["ser
 -- FogLAMP South Microservice - POLL Plugin template
 insert into foglamp.scheduled_processes ( name, script ) values ( 'POLL', '["services/south"]' );
 insert into foglamp.scheduled_processes ( name, script ) values ( 'CC2650POLL', '["services/south", "--bluetooth_adr", "B0:91:22:EA:79:04"]' );
+insert into foglamp.scheduled_processes ( name, script ) values ( 'CC2650ASYN', '["services/south", "--bluetooth_adr", "B0:91:22:EA:79:04"]' );
 insert into foglamp.scheduled_processes ( name, script ) values ( 'HTTP_SOUTH', '["services/south"]');
 insert into foglamp.scheduled_processes ( name, script ) values ( 'purge', '["tasks/purge"]' );
 insert into foglamp.scheduled_processes ( name, script ) values ( 'stats collector', '["tasks/statistics"]' );
@@ -873,11 +877,18 @@ schedule_interval, exclusive)
 values ('ada12840-68d3-11e7-907b-a6006ad3dba0', 'device', 'COAP', 1,
 '0:0', true);
 
--- Start the Poll mode device server at start-up
+-- Start the async mode CC2650 Sensortag at start-up
 insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
 schedule_interval, exclusive)
-values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'CC2650POLL', 1,
+values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'CC2650ASYN', 1,
 '0:0', true);
+
+
+-- Start the Poll mode CC2650 Sensortag at start-up
+--insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
+--schedule_interval, exclusive)
+--values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'CC2650POLL', 1,
+--'0:0', true);
 
 -- Start the Poll mode device server at start-up
 -- insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
