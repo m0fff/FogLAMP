@@ -4,10 +4,14 @@
 # See: http://foglamp.readthedocs.io/
 # FOGLAMP_END
 
-""" Template module for 'poll' type plugin """
+""" Module for Sensortag CC2650 'poll' type plugin """
+
 import copy
 import datetime
 import uuid
+
+import asyncio
+
 from foglamp.plugins.south.common.sensortag_cc2650 import *
 from foglamp.common.parser import Parser
 from foglamp.services.south import exceptions
@@ -29,8 +33,8 @@ _DEFAULT_CONFIG = {
         'type': 'integer',
         'default': '500'
     },
-    'bluetoothAddr': {
-        'description': 'Bluetooth Hexadecimal address of SensorTagCC2650 device',
+    'bluetooth_address': {
+        'description': 'Bluetooth MAC address',
         'type': 'string',
         'default': 'B0:91:22:EA:79:04'
     }
@@ -39,8 +43,6 @@ _DEFAULT_CONFIG = {
 _LOGGER = logger.setup(__name__, level=20)
 
 sensortag_characteristics = characteristics
-char_enable = '01'
-char_disable = '00'
 
 
 def plugin_info():
@@ -73,7 +75,7 @@ def plugin_init(config):
     """
     global sensortag_characteristics
 
-    bluetooth_adr = Parser.get('--bluetooth_adr')
+    bluetooth_adr = config['bluetooth_address']['value']
     tag = SensorTagCC2650(bluetooth_adr)
 
     # The GATT table can change for different firmware revisions, so it is important to do a proper characteristic
@@ -110,7 +112,7 @@ def plugin_poll(handle):
 
     time_stamp = str(datetime.datetime.now(tz=datetime.timezone.utc))
     data = {
-        'asset': 'sensortag',
+        'asset': 'TI sensortag',
         'timestamp': time_stamp,
         'key': str(uuid.uuid4()),
         'readings': {}
@@ -122,6 +124,7 @@ def plugin_poll(handle):
         ambient_temp_celsius = None
         lux_luminance = None
         rel_humidity = None
+        rel_temperature = None
         bar_pressure = None
         movement = None
 
@@ -133,7 +136,7 @@ def plugin_poll(handle):
         tag.char_write_cmd(handle['characteristics']['luminance']['configuration']['handle'], char_enable)
         tag.char_write_cmd(handle['characteristics']['humidity']['configuration']['handle'], char_enable)
         tag.char_write_cmd(handle['characteristics']['pressure']['configuration']['handle'], char_enable)
-        # tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], char_enable)
+        tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], movement_enable)
 
         # Get temperature
         count = 0
@@ -148,37 +151,81 @@ def plugin_poll(handle):
             handle['characteristics']['luminance']['data']['handle'], "luminance"))
 
         # Get humidity
-        rel_humidity = tag.hexHum2RelHum(tag.char_read_hnd(
+        rel_humidity, rel_temperature = tag.hexHum2RelHum(tag.char_read_hnd(
             handle['characteristics']['humidity']['data']['handle'], "humidity"))
 
         # Get pressure
         bar_pressure = tag.hexPress2Press(tag.char_read_hnd(
             handle['characteristics']['pressure']['data']['handle'], "pressure"))
 
-        # TODO: Implement movement data capture
         # Get movement
-        # tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], char_enable)
+        gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, mag_x, mag_y, mag_z, acc_range = tag.hexMovement2Mov(tag.char_read_hnd(
+            handle['characteristics']['movement']['data']['handle'], "movement"))
+        movement = {
+            'gyro': {
+                'x': gyro_x,
+                'y': gyro_y,
+                'z': gyro_z,
+            },
+            'acc': {
+                'x': acc_x,
+                'y': acc_y,
+                'z': acc_z,
+            },
+            'mag': {
+                'x': mag_x,
+                'y': mag_y,
+                'z': mag_z,
+            },
+            'acc_range': acc_range
+        }
 
         # Disable sensors
         tag.char_write_cmd(handle['characteristics']['temperature']['configuration']['handle'], char_disable)
         tag.char_write_cmd(handle['characteristics']['luminance']['configuration']['handle'], char_disable)
         tag.char_write_cmd(handle['characteristics']['humidity']['configuration']['handle'], char_disable)
         tag.char_write_cmd(handle['characteristics']['pressure']['configuration']['handle'], char_disable)
-        # tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], char_disable)
+        tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], movement_disable)
 
+        # "values" (and not "readings") denotes that this reading needs to be further broken down to components.
         data['readings'] = {
-                    'objectTemperature': object_temp_celsius,
-                    'ambientTemperature': ambient_temp_celsius,
-                    'luminance': lux_luminance,
-                    'humidity': rel_humidity,
-                    'pressure': bar_pressure,
-                    'movement': movement
-                }
+            'temperature': {
+                "object": object_temp_celsius,
+                'ambient': ambient_temp_celsius
+            },
+            'luxometer': {"lux": lux_luminance},
+            'humidity': {
+                "humidity": rel_humidity,
+                "temperature": rel_temperature
+            },
+            'pressure': {"pressure": bar_pressure},
+            'gyroscope': {
+                "x": gyro_x,
+                "y": gyro_y,
+                "z": gyro_z
+            },
+            'accelerometer': {
+                "x": acc_x,
+                "y": acc_y,
+                "z": acc_z
+            },
+            'magnetomer': {
+                "x": mag_x,
+                "y": mag_y,
+                "z": mag_z
+            }
+        }
+        for reading_key in data['readings']:
+            asyncio.ensure_future(
+                handle['ingest'].add_readings(asset=data['asset'] + '/' + reading_key,
+                                    timestamp=data['timestamp'],
+                                    key=str(uuid.uuid4()),
+                                    readings=data['readings'][reading_key]))
     except Exception as ex:
         _LOGGER.exception("SensorTagCC2650 {} exception: {}".format(bluetooth_adr, str(ex)))
         raise exceptions.DataRetrievalError(ex)
 
-    _LOGGER.info("SensorTagCC2650 {} reading: {}".format(bluetooth_adr, json.dumps(data)))
+    # _LOGGER.info("SensorTagCC2650 {} reading: {}".format(bluetooth_adr, json.dumps(data)))
     return data
 
 
@@ -210,15 +257,3 @@ def plugin_shutdown(handle):
     """
     bluetooth_adr = handle['bluetooth_adr']
     _LOGGER.info('SensorTagCC2650 {} Polling shutdown'.format(bluetooth_adr))
-
-
-if __name__ == "__main__":
-    # To run: python3 python/foglamp/plugins/south/sensortag/sensortag_cc2650.py B0:91:22:EA:79:04
-
-    bluetooth_adr = sys.argv[1]
-    # print(plugin_init({'bluetooth_adr': bluetooth_adr}))
-    print(plugin_poll(plugin_init({'bluetooth_adr': bluetooth_adr})))
-
-    # tag = SensorTagCC2650(bluetooth_adr)
-    # handle = tag.get_char_handle(characteristics['temperature']['data']['uuid'])
-    # print(handle)
