@@ -133,7 +133,8 @@ Bits	Usage
 """
 movement_enable = 'FFFF'
 movement_disable = '0000'
-
+notf_enable = '0100'
+notf_disable = '0000'
 
 class SensorTagCC2650(object):
     """Handles readings from SensorTagCC2650

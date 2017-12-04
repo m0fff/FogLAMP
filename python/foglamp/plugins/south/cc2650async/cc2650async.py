@@ -4,20 +4,18 @@
 # See: http://foglamp.readthedocs.io/
 # FOGLAMP_END
 
-""" Template module for 'async' type plugin """
+""" Module for Sensortag CC2650 'poll' type plugin """
+
 import copy
 import datetime
 import uuid
 
 import asyncio
 
-import requests
-
 from foglamp.plugins.south.common.sensortag_cc2650 import *
 from foglamp.common.parser import Parser
 from foglamp.services.south import exceptions
 from foglamp.common import logger
-from foglamp.services.south.ingest import Ingest
 
 __author__ = "Amarendra K Sinha"
 __copyright__ = "Copyright (c) 2017 OSIsoft, LLC"
@@ -28,10 +26,15 @@ _DEFAULT_CONFIG = {
     'plugin': {
          'description': 'Python module name of the plugin to load',
          'type': 'string',
-         'default': 'cc2650async'
+         'default': 'cc2650poll'
     },
-    'bluetoothAddr': {
-        'description': 'Bluetooth Hexadecimal address of SensorTagCC2650 device',
+    'pollInterval': {
+        'description': 'The interval between poll calls to the device poll routine expressed in milliseconds.',
+        'type': 'integer',
+        'default': '500'
+    },
+    'bluetooth_address': {
+        'description': 'Bluetooth MAC address',
         'type': 'string',
         'default': 'B0:91:22:EA:79:04'
     }
@@ -40,12 +43,6 @@ _DEFAULT_CONFIG = {
 _LOGGER = logger.setup(__name__, level=20)
 
 sensortag_characteristics = characteristics
-char_enable = '01'
-char_disable = '00'
-notf_enable = '0100'
-notf_disable = '0000'
-BASE_URL = 'http://localhost:6683/sensor-reading'
-headers = {"Content-Type": "application/json"}
 
 
 def plugin_info():
@@ -58,7 +55,7 @@ def plugin_info():
     """
 
     return {
-        'name': 'Poll plugin',
+        'name': 'Async plugin',
         'version': '1.0',
         'mode': 'async',
         'type': 'device',
@@ -78,7 +75,7 @@ def plugin_init(config):
     """
     global sensortag_characteristics
 
-    bluetooth_adr = Parser.get('--bluetooth_adr')
+    bluetooth_adr = config['bluetooth_address']['value']
     tag = SensorTagCC2650(bluetooth_adr)
 
     # The GATT table can change for different firmware revisions, so it is important to do a proper characteristic
@@ -94,7 +91,7 @@ def plugin_init(config):
     data['characteristics'] = sensortag_characteristics
     data['bluetooth_adr'] = bluetooth_adr
 
-    _LOGGER.info('SensorTagCC2650 {} Async initialized'.format(bluetooth_adr))
+    _LOGGER.info('SensorTagCC2650 {} Polling initialized'.format(bluetooth_adr))
 
     return data
 
@@ -112,14 +109,6 @@ def plugin_start(handle):
     Raises:
         DataRetrievalError
     """
-
-    time_stamp = str(datetime.datetime.now(tz=datetime.timezone.utc))
-    data = {
-        'asset': 'sensortag',
-        'timestamp': time_stamp,
-        'key': str(uuid.uuid4()),
-        'readings': {}
-    }
 
     try:
         bluetooth_adr = handle['bluetooth_adr']
@@ -148,6 +137,7 @@ def plugin_start(handle):
 
         # TODO: How to implement CTRL-C or terminate process?
         while True:
+            time_stamp = str(datetime.datetime.now(tz=datetime.timezone.utc))
             try:
                 pnum = tag.con.expect('Notification handle = .*? \r', timeout=4)
             except pexpect.TIMEOUT:
@@ -160,44 +150,64 @@ def plugin_start(handle):
                 # Get temperature
                 if int(handle['characteristics']['temperature']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
                     object_temp_celsius, ambient_temp_celsius = tag.hexTemp2C(tag.get_raw_measurement("temperature", hxstr))
-                    data['readings'] = {
-                                'objectTemperature': object_temp_celsius,
-                                'ambientTemperature': ambient_temp_celsius
-                            }
+                    data = {
+                        'asset': 'TI sensortag/temperature',
+                        'timestamp': time_stamp,
+                        'key': str(uuid.uuid4()),
+                        'readings': {
+                            'temperature': {
+                                "object": object_temp_celsius,
+                                'ambient': ambient_temp_celsius
+                            },
+                        }
+                    }
 
                 # Get luminance
                 if int(handle['characteristics']['luminance']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
                     lux_luminance = tag.hexLum2Lux(tag.get_raw_measurement("luminance", hxstr))
-                    data['readings'] = {
-                                'luminance': lux_luminance
-                            }
+                    data = {
+                        'asset': 'TI sensortag/luxometer',
+                        'timestamp': time_stamp,
+                        'key': str(uuid.uuid4()),
+                        'readings': {
+                            'luxometer': {"lux": lux_luminance},
+                        }
+                    }
 
                 # Get humidity
                 if int(handle['characteristics']['humidity']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
-                    rel_humidity = tag.hexHum2RelHum(tag.get_raw_measurement("humidity", hxstr))
-                    data['readings'] = {
-                                'humidity': rel_humidity
-                            }
+                    rel_humidity, rel_temperature = tag.hexHum2RelHum(tag.get_raw_measurement("humidity", hxstr))
+                    data = {
+                        'asset': 'TI sensortag/humidity',
+                        'timestamp': time_stamp,
+                        'key': str(uuid.uuid4()),
+                        'readings': {
+                            'humidity': {
+                                "humidity": rel_humidity,
+                                "temperature": rel_temperature
+                            },
+                        }
+                    }
 
                 # Get pressure
                 if int(handle['characteristics']['pressure']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
                     bar_pressure = tag.hexPress2Press(tag.get_raw_measurement("pressure", hxstr))
-                    data['readings'] = {
-                                'pressure': bar_pressure
-                            }
+                    data = {
+                        'asset': 'TI sensortag/pressure',
+                        'timestamp': time_stamp,
+                        'key': str(uuid.uuid4()),
+                        'readings': {
+                            'pressure': {"pressure": bar_pressure},
+                        }
+                    }
 
                 # TODO: Implement movement data capture
                 # Get movement
 
-                # print(data)
-                r = requests.post(BASE_URL, data=json.dumps(data), headers=headers)
-                retval = dict(r.json())
-                assert 200 == r.status_code
-
-                # asyncio.ensure_future(Ingest.add_readings(asset=data['asset'],
-                #                                 timestamp=data['timestamp'],
-                #                                 key=data['key'],
-                #                                 readings=data['readings']))
+                asyncio.ensure_future(handle['ingest'].add_readings(asset=data['asset'],
+                                                timestamp=data['timestamp'],
+                                                key=data['key'],
+                                                readings=data['readings']))
             else:
                 print("TIMEOUT!!")
     except Exception as ex:
