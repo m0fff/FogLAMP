@@ -109,130 +109,115 @@ def plugin_start(handle):
     Raises:
         DataRetrievalError
     """
-    inputs = list()
-    incoming = list()
-    event = asyncio.Event()
+    async def save_data():
+        try:
+            bluetooth_adr = handle['bluetooth_adr']
+            object_temp_celsius = None
+            ambient_temp_celsius = None
+            lux_luminance = None
+            rel_humidity = None
+            bar_pressure = None
+            movement = None
 
-    async def save_data(event):
-        global inputs
-        await event.wait()
-        print("==============> ", len(inputs))
-        # for input in inputs:
-        #     await handle['ingest'].add_readings(asset=input['asset'],
-        #                                                         timestamp=input['timestamp'],
-        #                                                         key=input['key'],
-        #                                                         readings=input['readings'])
-        event.clear()
+            tag = SensorTagCC2650(bluetooth_adr)  # pass the Bluetooth Address
 
-    asyncio.ensure_future(save_data(event))
+            # Enable notification
+            tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['temperature']['data']['handle']), notf_enable)
+            tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['luminance']['data']['handle']), notf_enable)
+            tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['humidity']['data']['handle']), notf_enable)
+            tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['pressure']['data']['handle']), notf_enable)
+            # tag.char_write_cmd(tag.get_notification_handlehandle['characteristics']['movement']['data']['handle']), notf_enable)
 
-    try:
-        bluetooth_adr = handle['bluetooth_adr']
-        object_temp_celsius = None
-        ambient_temp_celsius = None
-        lux_luminance = None
-        rel_humidity = None
-        bar_pressure = None
-        movement = None
+            # Enable sensors
+            tag.char_write_cmd(handle['characteristics']['temperature']['configuration']['handle'], char_enable)
+            tag.char_write_cmd(handle['characteristics']['luminance']['configuration']['handle'], char_enable)
+            tag.char_write_cmd(handle['characteristics']['humidity']['configuration']['handle'], char_enable)
+            tag.char_write_cmd(handle['characteristics']['pressure']['configuration']['handle'], char_enable)
+            # tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], char_enable)
 
-        tag = SensorTagCC2650(bluetooth_adr)  # pass the Bluetooth Address
+            # TODO: How to implement CTRL-C or terminate process?
+            while True:
+                time_stamp = str(datetime.datetime.now(tz=datetime.timezone.utc))
+                try:
+                    pnum = yield from tag.con.expect('Notification handle = .*? \r', async=True)
+                except pexpect.TIMEOUT:
+                    print("TIMEOUT exception!")
 
-        # Enable notification
-        tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['temperature']['data']['handle']), notf_enable)
-        tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['luminance']['data']['handle']), notf_enable)
-        tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['humidity']['data']['handle']), notf_enable)
-        tag.char_write_cmd(tag.get_notification_handle(handle['characteristics']['pressure']['data']['handle']), notf_enable)
-        # tag.char_write_cmd(tag.get_notification_handlehandle['characteristics']['movement']['data']['handle']), notf_enable)
-
-        # Enable sensors
-        tag.char_write_cmd(handle['characteristics']['temperature']['configuration']['handle'], char_enable)
-        tag.char_write_cmd(handle['characteristics']['luminance']['configuration']['handle'], char_enable)
-        tag.char_write_cmd(handle['characteristics']['humidity']['configuration']['handle'], char_enable)
-        tag.char_write_cmd(handle['characteristics']['pressure']['configuration']['handle'], char_enable)
-        # tag.char_write_cmd(handle['characteristics']['movement']['configuration']['handle'], char_enable)
-
-        # TODO: How to implement CTRL-C or terminate process?
-        while True:
-            time_stamp = str(datetime.datetime.now(tz=datetime.timezone.utc))
-            try:
-                pnum = tag.con.expect('Notification handle = .*? \r', timeout=4)
-            except pexpect.TIMEOUT:
-                print("TIMEOUT exception!")
-                break
-            if pnum == 0:
-                after = tag.con.after
-                hxstr = after.split()[3:]
-                print("****", hxstr, event.is_set())
-                # Get temperature
-                if int(handle['characteristics']['temperature']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
-                    object_temp_celsius, ambient_temp_celsius = tag.hexTemp2C(tag.get_raw_measurement("temperature", hxstr))
-                    data = {
-                        'asset': 'TI sensortag/temperature',
-                        'timestamp': time_stamp,
-                        'key': str(uuid.uuid4()),
-                        'readings': {
-                            'temperature': {
-                                "object": object_temp_celsius,
-                                'ambient': ambient_temp_celsius
-                            },
+                if pnum == 0:
+                    after = tag.con.after
+                    hxstr = after.split()[3:]
+                    print("****", hxstr)
+                    # Get temperature
+                    if int(handle['characteristics']['temperature']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
+                        object_temp_celsius, ambient_temp_celsius = tag.hexTemp2C(tag.get_raw_measurement("temperature", hxstr))
+                        data = {
+                            'asset': 'TI sensortag/temperature',
+                            'timestamp': time_stamp,
+                            'key': str(uuid.uuid4()),
+                            'readings': {
+                                'temperature': {
+                                    "object": object_temp_celsius,
+                                    'ambient': ambient_temp_celsius
+                                },
+                            }
                         }
-                    }
 
-                # Get luminance
-                if int(handle['characteristics']['luminance']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
-                    lux_luminance = tag.hexLum2Lux(tag.get_raw_measurement("luminance", hxstr))
-                    data = {
-                        'asset': 'TI sensortag/luxometer',
-                        'timestamp': time_stamp,
-                        'key': str(uuid.uuid4()),
-                        'readings': {
-                            'luxometer': {"lux": lux_luminance},
+                    # Get luminance
+                    if int(handle['characteristics']['luminance']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
+                        lux_luminance = tag.hexLum2Lux(tag.get_raw_measurement("luminance", hxstr))
+                        data = {
+                            'asset': 'TI sensortag/luxometer',
+                            'timestamp': time_stamp,
+                            'key': str(uuid.uuid4()),
+                            'readings': {
+                                'luxometer': {"lux": lux_luminance},
+                            }
                         }
-                    }
 
-                # Get humidity
-                if int(handle['characteristics']['humidity']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
-                    rel_humidity, rel_temperature = tag.hexHum2RelHum(tag.get_raw_measurement("humidity", hxstr))
-                    data = {
-                        'asset': 'TI sensortag/humidity',
-                        'timestamp': time_stamp,
-                        'key': str(uuid.uuid4()),
-                        'readings': {
-                            'humidity': {
-                                "humidity": rel_humidity,
-                                "temperature": rel_temperature
-                            },
+                    # Get humidity
+                    if int(handle['characteristics']['humidity']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
+                        rel_humidity, rel_temperature = tag.hexHum2RelHum(tag.get_raw_measurement("humidity", hxstr))
+                        data = {
+                            'asset': 'TI sensortag/humidity',
+                            'timestamp': time_stamp,
+                            'key': str(uuid.uuid4()),
+                            'readings': {
+                                'humidity': {
+                                    "humidity": rel_humidity,
+                                    "temperature": rel_temperature
+                                },
+                            }
                         }
-                    }
 
-                # Get pressure
-                if int(handle['characteristics']['pressure']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
-                    bar_pressure = tag.hexPress2Press(tag.get_raw_measurement("pressure", hxstr))
-                    data = {
-                        'asset': 'TI sensortag/pressure',
-                        'timestamp': time_stamp,
-                        'key': str(uuid.uuid4()),
-                        'readings': {
-                            'pressure': {"pressure": bar_pressure},
+                    # Get pressure
+                    if int(handle['characteristics']['pressure']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
+                        bar_pressure = tag.hexPress2Press(tag.get_raw_measurement("pressure", hxstr))
+                        data = {
+                            'asset': 'TI sensortag/pressure',
+                            'timestamp': time_stamp,
+                            'key': str(uuid.uuid4()),
+                            'readings': {
+                                'pressure': {"pressure": bar_pressure},
+                            }
                         }
-                    }
 
-                # TODO: Implement movement data capture
-                # Get movement
+                    # TODO: Implement movement data capture
+                    # Get movement
 
-                incoming.append(data)
-                if len(incoming) >= 50:
-                    inputs = copy.deepcopy(incoming)
-                    incoming = list()
-                    event.set()
-            else:
-                print("TIMEOUT!!")
-    except Exception as ex:
-        _LOGGER.exception("SensorTagCC2650 {} async exception: {}".format(bluetooth_adr, str(ex)))
-        raise exceptions.DataRetrievalError(ex)
+                    await handle['ingest'].add_readings(asset=data['asset'],
+                                                                        timestamp=data['timestamp'],
+                                                                        key=data['key'],
+                                                                        readings=data['readings'])
+                else:
+                    print("TIMEOUT!!")
+        except Exception as ex:
+            _LOGGER.exception("SensorTagCC2650 {} async exception: {}".format(bluetooth_adr, str(ex)))
+            raise exceptions.DataRetrievalError(ex)
 
-    _LOGGER.info("SensorTagCC2650 {} async reading: {}".format(bluetooth_adr, json.dumps(data)))
-    return data
+        _LOGGER.info("SensorTagCC2650 {} async reading: {}".format(bluetooth_adr, json.dumps(data)))
+
+    asyncio.ensure_future(save_data())
+    return handle
 
 
 def plugin_reconfigure(handle, new_config):
