@@ -139,9 +139,10 @@ def plugin_start(handle):
             while True:
                 time_stamp = str(datetime.datetime.now(tz=datetime.timezone.utc))
                 try:
-                    pnum = yield from tag.con.expect('Notification handle = .*? \r', async=True)
+                    pnum = tag.con.expect('Notification handle = .*? \r', timeout=4)
                 except pexpect.TIMEOUT:
                     print("TIMEOUT exception!")
+                    break
 
                 if pnum == 0:
                     after = tag.con.after
