@@ -109,6 +109,22 @@ def plugin_start(handle):
     Raises:
         DataRetrievalError
     """
+    inputs = list()
+    incoming = list()
+    event = asyncio.Event()
+
+    async def save_data(event):
+        global inputs
+        await event.wait()
+        print("==============> ", len(inputs))
+        # for input in inputs:
+        #     await handle['ingest'].add_readings(asset=input['asset'],
+        #                                                         timestamp=input['timestamp'],
+        #                                                         key=input['key'],
+        #                                                         readings=input['readings'])
+        event.clear()
+
+    asyncio.ensure_future(save_data(event))
 
     try:
         bluetooth_adr = handle['bluetooth_adr']
@@ -146,7 +162,7 @@ def plugin_start(handle):
             if pnum == 0:
                 after = tag.con.after
                 hxstr = after.split()[3:]
-                print("****", hxstr)
+                print("****", hxstr, event.is_set())
                 # Get temperature
                 if int(handle['characteristics']['temperature']['data']['handle'], 16) == int(hxstr[0].decode(), 16):
                     object_temp_celsius, ambient_temp_celsius = tag.hexTemp2C(tag.get_raw_measurement("temperature", hxstr))
@@ -204,10 +220,11 @@ def plugin_start(handle):
                 # TODO: Implement movement data capture
                 # Get movement
 
-                asyncio.ensure_future(handle['ingest'].add_readings(asset=data['asset'],
-                                                timestamp=data['timestamp'],
-                                                key=data['key'],
-                                                readings=data['readings']))
+                incoming.append(data)
+                if len(incoming) >= 50:
+                    inputs = copy.deepcopy(incoming)
+                    incoming = list()
+                    event.set()
             else:
                 print("TIMEOUT!!")
     except Exception as ex:
