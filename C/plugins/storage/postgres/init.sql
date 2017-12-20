@@ -697,6 +697,7 @@ CREATE TABLE foglamp.schedules (
   schedule_day      smallint,                       -- ISO day 1 = Monday, 7 = Sunday
   exclusive         boolean not null default true,  -- true = Only one task can run
                                                     -- at any given time
+  enabled           boolean not null default false, -- false = A given schedule is disabled by default
   CONSTRAINT schedules_pkey PRIMARY KEY (id),
   CONSTRAINT schedules_fk1 FOREIGN KEY (process_name)
   REFERENCES foglamp.scheduled_processes (name) MATCH SIMPLE
@@ -903,82 +904,82 @@ INSERT INTO foglamp.scheduled_processes (name, script) values ('restore','["task
 
 -- Start the device server at start-up
 INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_interval, exclusive)
+schedule_interval, exclusive, enabled)
 values ('ada12840-68d3-11e7-907b-a6006ad3dba0', 'device', 'COAP', 1,
-'0:0', true);
+'0:0', true, true);
 
 -- Execute a Backup every 1 hour
--- insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
--- schedule_time, schedule_interval, exclusive)
--- values ('d1631422-9ec6-11e7-abc4-cec278b6b50a', 'backup', 'backup', 3,
--- NULL, '01:00:00', true);
+insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
+schedule_time, schedule_interval, exclusive, enabled)
+values ('d1631422-9ec6-11e7-abc4-cec278b6b50a', 'backup', 'backup', 3,
+NULL, '01:00:00', true, false);
 
 -- Used to execute an on demand Backup
 insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_time, schedule_interval, exclusive)
+schedule_time, schedule_interval, exclusive, enabled)
 values ('fac8dae6-d8d1-11e7-9296-cec278b6b50a', 'backup on demand', 'backup', 4,
-NULL, '00:00:00', true);
+NULL, '00:00:00', true, true);
 
 -- Used to execute an on demand Restore
 insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_time, schedule_interval, exclusive)
+schedule_time, schedule_interval, exclusive, enabled)
 values ('8d4d3ca0-de80-11e7-80c1-9a214cf093ae', 'restore on demand', 'restore', 4,
-NULL, '00:00:00', true);
+NULL, '00:00:00', true, true);
 
 -- Start the Poll mode device server at start-up
 insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_interval, exclusive)
+schedule_interval, exclusive, enabled)
 values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'CC2650POLL', 1,
-'0:0', true);
+'0:0', true, true);
 
 -- Start the async mode CC2650 Sensortag at start-up
---insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
---schedule_interval, exclusive)
---values ('716a16ea-c736-490b-86d5-10204585ca8c', 'device', 'CC2650ASYN', 1,
---'0:0', true);
+insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
+schedule_interval, exclusive, enabled)
+values ('716a16ea-c736-490b-86d5-10204585ca8c', 'device', 'CC2650ASYN', 1,
+'0:0', true, false);
 
 -- Start the Poll mode device server at start-up
--- insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
--- schedule_interval, exclusive)
--- values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'POLL', 1,
--- '0:0', true);
+insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
+schedule_interval, exclusive, enabled)
+values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'POLL', 1,
+'0:0', true, false);
 
 
 ---- Start the device server HTTP Listener at start-up
--- INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
---  schedule_interval, exclusive)
---  values ('a2caca59-1241-478d-925a-79584e7096e0', 'device', 'HTTP_SOUTH', 1,
---  '0:0', true);
+INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
+schedule_interval, exclusive, enabled)
+values ('a2caca59-1241-478d-925a-79584e7096e0', 'device', 'HTTP_SOUTH', 1,
+'0:0', true, false);
 
 -- Run the purge process every 5 minutes
 INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_time, schedule_interval, exclusive)
+schedule_time, schedule_interval, exclusive, enabled)
 values ('cea17db8-6ccc-11e7-907b-a6006ad3dba0', 'purge', 'purge', 3,
-NULL, '00:05:00', true);
+NULL, '00:05:00', true, true);
 
 -- Run the statistics collector every 15 seconds
 INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_time, schedule_interval, exclusive)
+schedule_time, schedule_interval, exclusive, enabled)
 values ('2176eb68-7303-11e7-8cf7-a6006ad3dba0', 'stats collector', 'stats collector', 3,
-NULL, '00:00:15', true);
+NULL, '00:00:15', true, true);
 
 -- Run the sending process every 15 seconds
 INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_time, schedule_interval, exclusive)
+schedule_time, schedule_interval, exclusive, enabled)
 values ('2b614d26-760f-11e7-b5a5-be2e44b06b34', 'sending process', 'sending process', 3,
-NULL, '00:00:15', true);
+NULL, '00:00:15', true, true);
 
 -- Run the sending process using HTTP translator every 15 seconds
--- INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
--- schedule_time, schedule_interval, exclusive)
--- values ('81bdf749-8aa0-468e-b229-9ff695668e8c', 'sending via HTTP', 'sending HTTP', 3,
--- NULL, '00:00:15', true);
+INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
+schedule_time, schedule_interval, exclusive, enabled)
+values ('81bdf749-8aa0-468e-b229-9ff695668e8c', 'sending via HTTP', 'sending HTTP', 3,
+NULL, '00:00:15', true, false);
 
 -- Run FogLAMP statistics into PI every 25 seconds
 INSERT INTO foglamp.schedules(id, schedule_name, process_name, schedule_type,
-schedule_time, schedule_interval, exclusive)
+schedule_time, schedule_interval, exclusive, enabled)
 values ('1d7c327e-7dae-11e7-bb31-be2e44b06b34', 'statistics to pi', 'statistics to pi', 3,
-NULL, '00:00:25', true);
+NULL, '00:00:25', true, true);
 
 -- OMF translator configuration
 INSERT INTO foglamp.destinations(id,description, ts) VALUES (1,'OMF', now());

@@ -60,7 +60,7 @@ class Scheduler(object):
     # TODO: Document the fields
     _ScheduleRow = collections.namedtuple('ScheduleRow', ['id', 'name', 'type', 'time', 'day',
                                                           'repeat', 'repeat_seconds', 'exclusive',
-                                                          'process_name'])
+                                                          'enabled', 'process_name'])
     """Represents a row in the schedules table"""
 
     class _TaskProcess(object):
@@ -314,6 +314,7 @@ class Scheduler(object):
         task_process.schedule = schedule
         task_process.task_id = task_id
 
+        # All tasks including STARTUP tasks go into both self._task_processes and self._schedule_executions
         self._task_processes[task_id] = task_process
         self._schedule_executions[schedule.id].task_processes[task_id] = task_process
 
@@ -342,6 +343,43 @@ class Scheduler(object):
 
         asyncio.ensure_future(self._wait_for_task_completion(task_process))
 
+    async def purge_tasks(self):
+        """Deletes rows from the tasks table"""
+        if self._paused:
+            return
+
+        if not self._ready:
+            raise NotReadyError()
+
+        delete_payload = PayloadBuilder() \
+            .WHERE(["state", "!=", int(Task.State.RUNNING)]) \
+            .AND_WHERE(["start_time", "<", str(datetime.datetime.now() - self._max_completed_task_age)]) \
+            .LIMIT(self._DELETE_TASKS_LIMIT) \
+            .payload()
+        try:
+            self._logger.debug('Database command: %s', delete_payload)
+            while not self._paused:
+                res = self._storage.delete_from_tbl("tasks", delete_payload)
+                # TODO: Uncomment below when delete count becomes available in storage layer
+                # if res.get("count") < self._DELETE_TASKS_LIMIT:
+                break
+        except Exception:
+            self._logger.exception('Delete failed: %s', delete_payload)
+            raise
+        finally:
+            self._purge_tasks_task = None
+
+        self._last_task_purge_time = time.time()
+
+    def _check_purge_tasks(self):
+        """Schedules :meth:`_purge_tasks` to run if sufficient time has elapsed
+        since it last ran
+        """
+
+        if self._purge_tasks_task is None and (self._last_task_purge_time is None or (
+                    time.time() - self._last_task_purge_time) >= self._PURGE_TASKS_FREQUENCY_SECONDS):
+            self._purge_tasks_task = asyncio.ensure_future(self.purge_tasks())
+
     async def _check_schedules(self):
         """Starts tasks according to schedules based on the current time"""
         earliest_start_time = None
@@ -359,6 +397,9 @@ class Scheduler(object):
                 # The schedule has been deleted
                 if not schedule_execution.task_processes:
                     del self._schedule_executions[schedule_id]
+                continue
+
+            if schedule.enabled is False:
                 continue
 
             if schedule.exclusive and schedule_execution.task_processes:
@@ -550,6 +591,8 @@ class Scheduler(object):
                 when to schedule tasks
 
         """
+        if schedule.enabled is False:
+            return
         if schedule.type == Schedule.Type.MANUAL:
             return
 
@@ -628,6 +671,7 @@ class Scheduler(object):
                     repeat=interval,
                     repeat_seconds=repeat_seconds,
                     exclusive=True if row.get('exclusive') == 't' else False,
+                    enabled=True if row.get('enabled') == 't' else False,
                     process_name=row.get('process_name'))
 
                 self._schedules[schedule_id] = schedule
@@ -864,6 +908,7 @@ class Scheduler(object):
 
         schedule.schedule_id = schedule_id
         schedule.exclusive = schedule_row.exclusive
+        schedule.enabled = schedule_row.enabled
         schedule.name = schedule_row.name
         schedule.process_name = schedule_row.process_name
         schedule.repeat = schedule_row.repeat
@@ -964,6 +1009,7 @@ class Scheduler(object):
                      schedule_day=day if day else 0,
                      schedule_time=str(schedule_time) if schedule_time else '00:00:00',
                      exclusive='t' if schedule.exclusive else 'f',
+                     enabled='t' if schedule.enabled else 'f',
                      process_name=schedule.process_name) \
                 .WHERE(['id', '=', str(schedule.schedule_id)]) \
                 .payload()
@@ -985,6 +1031,7 @@ class Scheduler(object):
                         schedule_day=day if day else 0,
                         schedule_time=str(schedule_time) if schedule_time else '00:00:00',
                         exclusive='t' if schedule.exclusive else 'f',
+                        enabled='t' if schedule.enabled else 'f',
                         process_name=schedule.process_name) \
                 .payload()
             try:
@@ -1007,6 +1054,7 @@ class Scheduler(object):
             repeat=schedule.repeat,
             repeat_seconds=repeat_seconds,
             exclusive=schedule.exclusive,
+            enabled=schedule.enabled,
             process_name=schedule.process_name)
 
         self._schedules[schedule.schedule_id] = schedule_row
@@ -1021,6 +1069,86 @@ class Scheduler(object):
             now = self.current_time if self.current_time else time.time()
             self._schedule_first_task(schedule_row, now)
             self._resume_check_schedules()
+
+    async def disable_schedule(self, sch_id):
+        schedule_id = uuid.UUID(sch_id)
+        try:
+            task_process_key = [x for x in self._task_processes.keys() if self._task_processes[x]['schedule']['schedule_id'] == schedule_id]
+            task_id = task_process_key[0]
+            task_process = self._task_processes[task_id]
+        except KeyError:
+            self._logger.info("No Task running for Schedule %s", schedule_id)
+            return False
+
+        # TODO: FOGL-356 track the last time TERM was sent to each task
+        task_process.cancel_requested = time.time()
+
+        schedule = task_process.schedule
+
+        if schedule.enabled is False:
+            self._logger.info("Schedule %s already disabled", schedule_id)
+            return True
+
+        self._logger.info(
+            "Stopping process: Schedule '%s/%s' process '%s' task %s pid %s\n%s",
+            schedule.name,
+            schedule.schedule_id,
+            schedule.process_name,
+            task_id,
+            task_process.process.pid,
+            self._process_scripts[schedule.process_name])
+
+        try:
+            task_process.process.terminate()
+            time.sleep(2)  # Allow sufficient time for STARTUP type tasks to unregister/terminate etc
+        except ProcessLookupError:
+            pass  # Process has terminated
+
+        update_payload = PayloadBuilder() \
+            .SET(enabled='f') \
+            .WHERE(['id', '=', str(schedule.schedule_id)]) \
+            .payload()
+        try:
+            self._logger.debug('Database command: %s', update_payload)
+            res = self._storage.update_tbl("schedules", update_payload)
+        except Exception:
+            self._logger.exception('Update failed: %s', update_payload)
+            raise RuntimeError('Update failed: %s', update_payload)
+
+        return True
+
+    async def enable_schedule(self, sch_id):
+        schedule_id = uuid.UUID(sch_id)
+        try:
+            schedule = await self.get_schedule(schedule_id)
+        except KeyError:
+            self._logger.info("No such Schedule %s", schedule_id)
+            return False
+
+        if schedule.enabled is True:
+            self._logger.info("Schedule %s already enabled", schedule_id)
+            return True
+
+        # Enable schedule
+        update_payload = PayloadBuilder() \
+            .SET(enabled='t') \
+            .WHERE(['id', '=', str(schedule.schedule_id)]) \
+            .payload()
+        try:
+            self._logger.debug('Database command: %s', update_payload)
+            res = self._storage.update_tbl("schedules", update_payload)
+        except Exception:
+            self._logger.exception('Update failed: %s', update_payload)
+            raise RuntimeError('Update failed: %s', update_payload)
+
+        # Start schedule
+        self._schedules[schedule.schedule_id]['enabled'] = True
+        schedule_row = self._schedules[schedule.schedule_id]
+        now = self.current_time if self.current_time else time.time()
+        self._schedule_first_task(schedule_row, now)
+        self._resume_check_schedules()
+
+        return True
 
     async def queue_task(self, schedule_id: uuid.UUID) -> None:
         """Requests a task to be started for a schedule
@@ -1219,41 +1347,3 @@ class Scheduler(object):
             task_process.process.terminate()
         except ProcessLookupError:
             pass  # Process has terminated
-
-    def _check_purge_tasks(self):
-        """Schedules :meth:`_purge_tasks` to run if sufficient time has elapsed
-        since it last ran
-        """
-
-        if self._purge_tasks_task is None and (self._last_task_purge_time is None or (
-                    time.time() - self._last_task_purge_time) >= self._PURGE_TASKS_FREQUENCY_SECONDS):
-            self._purge_tasks_task = asyncio.ensure_future(self.purge_tasks())
-
-    async def purge_tasks(self):
-        """Deletes rows from the tasks table"""
-        if self._paused:
-            return
-
-        if not self._ready:
-            raise NotReadyError()
-
-        delete_payload = PayloadBuilder() \
-            .WHERE(["state", "!=", int(Task.State.RUNNING)]) \
-            .AND_WHERE(["start_time", "<", str(datetime.datetime.now() - self._max_completed_task_age)]) \
-            .LIMIT(self._DELETE_TASKS_LIMIT) \
-            .payload()
-        try:
-            self._logger.debug('Database command: %s', delete_payload)
-            while not self._paused:
-                res = self._storage.delete_from_tbl("tasks", delete_payload)
-                # TODO: Uncomment below when delete count becomes available in storage layer
-                # if res.get("count") < self._DELETE_TASKS_LIMIT:
-                break
-        except Exception:
-            self._logger.exception('Delete failed: %s', delete_payload)
-            raise
-        finally:
-            self._purge_tasks_task = None
-
-        self._last_task_purge_time = time.time()
-
