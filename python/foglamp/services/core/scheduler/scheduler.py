@@ -1070,11 +1070,23 @@ class Scheduler(object):
             self._schedule_first_task(schedule_row, now)
             self._resume_check_schedules()
 
-    async def disable_schedule(self, sch_id):
-        schedule_id = uuid.UUID(sch_id)
+    async def disable_schedule(self, schedule_id):
+        """
+        Find running Schedule, Terminate running process, Disable Schedule, Update database
+
+        :param schedule_id:
+        :return:
+        """
+        # Find running task for the schedule.
+        # self._task_processes contains ALL tasks including STARTUP tasks.
         try:
-            task_process_key = [x for x in self._task_processes.keys() if self._task_processes[x]['schedule']['schedule_id'] == schedule_id]
-            task_id = task_process_key[0]
+            task_id = None
+            for key in list(self._task_processes.keys()):
+                if self._task_processes[key].schedule.id == schedule_id:
+                    task_id = key
+                    break
+            if task_id is None:
+                raise KeyError
             task_process = self._task_processes[task_id]
         except KeyError:
             self._logger.info("No Task running for Schedule %s", schedule_id)
@@ -1089,24 +1101,46 @@ class Scheduler(object):
             self._logger.info("Schedule %s already disabled", schedule_id)
             return True
 
-        self._logger.info(
-            "Stopping process: Schedule '%s/%s' process '%s' task %s pid %s\n%s",
-            schedule.name,
-            schedule.schedule_id,
-            schedule.process_name,
-            task_id,
-            task_process.process.pid,
-            self._process_scripts[schedule.process_name])
-
+        # Terminate process
         try:
+            print("PID ", task_process.process.pid)
             task_process.process.terminate()
             time.sleep(2)  # Allow sufficient time for STARTUP type tasks to unregister/terminate etc
         except ProcessLookupError:
             pass  # Process has terminated
 
+        # TODO: If schedule is a service, then deal with microservices shutdown, unregister etc.
+
+        self._logger.info(
+            "Disabled Schedule '%s/%s' process '%s' task %s pid %s\n%s",
+            schedule.name,
+            schedule.id,
+            schedule.process_name,
+            task_id,
+            task_process.process.pid,
+            self._process_scripts[schedule.process_name])
+
+        # Disable Schedule
+        # We need to recreate the _ScheduleRow for just one change - enabled = False. This is required as _ScheduleRow
+        # is of named tuple type which does not allow updation.
+        schedule_row = self._ScheduleRow(
+            id=schedule.id,
+            name=schedule.name,
+            type=schedule.type,
+            time=schedule.time,
+            day=schedule.day,
+            repeat=schedule.repeat,
+            repeat_seconds=schedule.repeat_seconds,
+            exclusive=schedule.exclusive,
+            enabled=False,
+            process_name=schedule.process_name)
+
+        self._schedules[schedule.id] = schedule_row
+
+        # Update database
         update_payload = PayloadBuilder() \
             .SET(enabled='f') \
-            .WHERE(['id', '=', str(schedule.schedule_id)]) \
+            .WHERE(['id', '=', str(schedule.id)]) \
             .payload()
         try:
             self._logger.debug('Database command: %s', update_payload)
@@ -1117,8 +1151,13 @@ class Scheduler(object):
 
         return True
 
-    async def enable_schedule(self, sch_id):
-        schedule_id = uuid.UUID(sch_id)
+    async def enable_schedule(self, schedule_id):
+        """
+        Get Schedule, Enable Schedule, Update database, Start Schedule
+
+        :param schedule_id:
+        :return:
+        """
         try:
             schedule = await self.get_schedule(schedule_id)
         except KeyError:
@@ -1129,7 +1168,40 @@ class Scheduler(object):
             self._logger.info("Schedule %s already enabled", schedule_id)
             return True
 
-        # Enable schedule
+        # Enable Schedule
+        # We need to recreate the _ScheduleRow for just one change - enabled = True. This is required as _ScheduleRow
+        # is of named tuple type which does not allow updation.
+        if isinstance(schedule, TimedSchedule):
+            schedule_time = schedule.time
+            if schedule_time is not None and not isinstance(schedule_time, datetime.time):
+                raise ValueError('time must be of type datetime.time')
+            day = schedule.day
+            # TODO Remove this check when the database has constraint
+            if day is not None and (day < 1 or day > 7):
+                raise ValueError('day must be between 1 and 7')
+        else:
+            day = None
+            schedule_time = None
+
+        repeat_seconds = None
+        if schedule.repeat is not None:
+            repeat_seconds = schedule.repeat.total_seconds()
+
+        schedule_row = self._ScheduleRow(
+            id=schedule.schedule_id,
+            name=schedule.name,
+            type=schedule.schedule_type,
+            time=schedule_time,
+            day=day,
+            repeat=schedule.repeat,
+            repeat_seconds=repeat_seconds,
+            exclusive=schedule.exclusive,
+            enabled=True,
+            process_name=schedule.process_name)
+
+        self._schedules[schedule.schedule_id] = schedule_row
+
+        # Update database
         update_payload = PayloadBuilder() \
             .SET(enabled='t') \
             .WHERE(['id', '=', str(schedule.schedule_id)]) \
@@ -1142,11 +1214,13 @@ class Scheduler(object):
             raise RuntimeError('Update failed: %s', update_payload)
 
         # Start schedule
-        self._schedules[schedule.schedule_id]['enabled'] = True
-        schedule_row = self._schedules[schedule.schedule_id]
-        now = self.current_time if self.current_time else time.time()
-        self._schedule_first_task(schedule_row, now)
-        self._resume_check_schedules()
+        await self.queue_task(schedule_id)
+
+        self._logger.info(
+            "Enabled Schedule '%s/%s' process '%s'\n",
+            schedule.name,
+            schedule.schedule_id,
+            schedule.process_name)
 
         return True
 

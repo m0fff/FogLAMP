@@ -27,9 +27,11 @@ _help = """
     
     | GET POST        | /foglamp/schedule                                         |
     | GET PUT DELETE  | /foglamp/schedule/{schedule_id}                           |
+    | GET             | /foglamp/schedule/enable/{schedule_id}                    |
+    | GET             | /foglamp/schedule/disable/{schedule_id}                   |
     | POST            | /foglamp/schedule/start/{schedule_id}                     |
     | GET             | /foglamp/schedule/type                                    |
-    
+
     | GET             | /foglamp/task                                             |
     | GET             | /foglamp/task/latest                                      |
     | GET PUT         | /foglamp/task/{task_id}                                   |
@@ -68,7 +70,7 @@ async def get_scheduled_process(request):
     if not scheduled_process_name:
         raise web.HTTPBadRequest(reason='No Scheduled Process Name given')
 
-    payload = PayloadBuilder().SELECT("name").WHERE(["name", "=", scheduled_process_name]).payload()
+    payload = PayloadBuilder().SELECT(("name")).WHERE(["name", "=", scheduled_process_name]).payload()
     _storage = connect.get_storage()
     scheduled_process = _storage.query_tbl_with_payload('scheduled_processes', payload)
 
@@ -119,6 +121,9 @@ def _extract_args(data, curr_value):
 
         _schedule['schedule_exclusive'] = data.get('exclusive') if 'exclusive' in data else curr_value['schedule_exclusive'] if curr_value else 'True'
         _schedule['schedule_exclusive'] = 'True' if _schedule['schedule_exclusive'] else 'False'
+
+        _schedule['schedule_enabled'] = data.get('enabled') if 'enabled' in data else curr_value['schedule_enabled'] if curr_value else 'True'
+        _schedule['schedule_enabled'] = 'True' if _schedule['schedule_enabled'] else 'False'
     except ValueError as ex:
         raise web.HTTPBadRequest(reason=str(ex))
 
@@ -178,7 +183,7 @@ async def _check_schedule_post_parameters(data, curr_value=None):
         _errors.append('Schedule name and Process name cannot be empty.')
 
     # Raise error if scheduled_process name is wrong
-    payload = PayloadBuilder().SELECT("name").WHERE(["name", "=", _schedule.get('schedule_process_name')]).payload()
+    payload = PayloadBuilder().SELECT(("name")).WHERE(["name", "=", _schedule.get('schedule_process_name')]).payload()
     _storage = connect.get_storage()
     scheduled_process = _storage.query_tbl_with_payload('scheduled_processes', payload)
 
@@ -188,6 +193,10 @@ async def _check_schedule_post_parameters(data, curr_value=None):
     # Raise error if exclusive is wrong
     if _schedule.get('schedule_exclusive') not in ['True', 'False']:
         _errors.append('Schedule exclusive error: {}'.format(_schedule.get('schedule_exclusive')))
+
+    # Raise error if enabled is wrong
+    if _schedule.get('schedule_enabled') not in ['True', 'False']:
+        _errors.append('Schedule enabled error: {}'.format(_schedule.get('schedule_enabled')))
 
     return _errors
 
@@ -223,6 +232,7 @@ async def _execute_add_update_schedule(data, curr_value=None):
     schedule.repeat = datetime.timedelta(seconds=_schedule['schedule_repeat'])
 
     schedule.exclusive = True if _schedule.get('schedule_exclusive') == 'True' else False
+    schedule.enabled = True if _schedule.get('schedule_enabled') == 'True' else False
 
     # Save schedule
     await server.Server.scheduler.save_schedule(schedule)
@@ -244,12 +254,13 @@ async def get_schedules(request):
         schedules.append({
             'id': str(sch.schedule_id),
             'name': sch.name,
-            'processName': sch.process_name,
+            'process_name': sch.process_name,
             'type': Schedule.Type(int(sch.schedule_type)).name,
             'repeat': sch.repeat.total_seconds() if sch.repeat else 0,
-            'time': (sch.time.hour * 60 * 60 + sch.time.minute * 60 + sch.time.second) if sch.time else 0,
+            'time': (sch.time.hour * 60 * 60 + sch.time.minute * 60 + sch.time.second) if sch.time else 0 ,
             'day': sch.day,
-            'exclusive': sch.exclusive
+            'exclusive': sch.exclusive,
+            'enabled': sch.enabled
         })
 
     return web.json_response({'schedules': schedules})
@@ -278,12 +289,71 @@ async def get_schedule(request):
         schedule = {
             'id': str(sch.schedule_id),
             'name': sch.name,
-            'processName': sch.process_name,
+            'process_name': sch.process_name,
             'type': Schedule.Type(int(sch.schedule_type)).name,
             'repeat': sch.repeat.total_seconds() if sch.repeat else 0,
             'time': (sch.time.hour * 60 * 60 + sch.time.minute * 60 + sch.time.second) if sch.time else 0,
             'day': sch.day,
-            'exclusive': sch.exclusive
+            'exclusive': sch.exclusive,
+            'enabled': sch.enabled
+        }
+
+        return web.json_response(schedule)
+    except (ValueError, ScheduleNotFoundError) as ex:
+        raise web.HTTPNotFound(reason=str(ex))
+
+
+async def enable_schedule(request):
+    """
+    Enable the given schedule from schedules table
+
+    :Example: curl -X GET  http://localhost:8082/foglamp/schedule/enable/ac6dd55d-f55d-44f7-8741-984604bf2384
+    """
+
+    try:
+        schedule_id = request.match_info.get('schedule_id', None)
+
+        if not schedule_id:
+            raise web.HTTPBadRequest(reason='Schedule ID is required.')
+
+        try:
+            assert uuid.UUID(schedule_id)
+        except ValueError as ex:
+            raise web.HTTPNotFound(reason="Invalid Schedule ID {}".format(schedule_id))
+
+        status = await server.Server.scheduler.enable_schedule(uuid.UUID(schedule_id))
+
+        schedule = {
+            'status': status
+        }
+
+        return web.json_response(schedule)
+    except (ValueError, ScheduleNotFoundError) as ex:
+        raise web.HTTPNotFound(reason=str(ex))
+
+
+async def disable_schedule(request):
+    """
+    Disable the given schedule from schedules table
+
+    :Example: curl -X GET  http://localhost:8082/foglamp/schedule/disable/ac6dd55d-f55d-44f7-8741-984604bf2384
+    """
+
+    try:
+        schedule_id = request.match_info.get('schedule_id', None)
+
+        if not schedule_id:
+            raise web.HTTPBadRequest(reason='Schedule ID is required.')
+
+        try:
+            assert uuid.UUID(schedule_id)
+        except ValueError as ex:
+            raise web.HTTPNotFound(reason="Invalid Schedule ID {}".format(schedule_id))
+
+        status = await server.Server.scheduler.disable_schedule(uuid.UUID(schedule_id))
+
+        schedule = {
+            'status': status
         }
 
         return web.json_response(schedule)
@@ -344,12 +414,13 @@ async def post_schedule(request):
         schedule = {
             'id': str(sch.schedule_id),
             'name': sch.name,
-            'processName': sch.process_name,
+            'process_name': sch.process_name,
             'type': Schedule.Type(int(sch.schedule_type)).name,
             'repeat': sch.repeat.total_seconds() if sch.repeat else 0,
             'time': (sch.time.hour * 60 * 60 + sch.time.minute * 60 + sch.time.second) if sch.time else 0,
             'day': sch.day,
-            'exclusive': sch.exclusive
+            'exclusive': sch.exclusive,
+            'enabled': sch.enabled
         }
 
         return web.json_response({'schedule': schedule})
@@ -358,7 +429,8 @@ async def post_schedule(request):
 
 
 async def update_schedule(request):
-    """ Update a schedule in schedules table
+    """
+    Update a schedule in schedules table
 
     :Example: curl -d '{"type": 4, "name": "sleep30 updated", "process_name": "sleep30", "repeat": "15"}'  -X PUT  http://localhost:8082/foglamp/schedule/84fe4ea1-df9c-4c87-bb78-cab2e7d5d2cc
     """
@@ -388,6 +460,7 @@ async def update_schedule(request):
         curr_value['schedule_time'] = (sch.time.hour * 60 * 60 + sch.time.minute * 60 + sch.time.second) if sch.time else 0
         curr_value['schedule_day'] = sch.day
         curr_value['schedule_exclusive'] = sch.exclusive
+        curr_value['schedule_enabled'] = sch.enabled
 
         go_no_go = await _check_schedule_post_parameters(data, curr_value)
         if len(go_no_go) != 0:
@@ -400,12 +473,13 @@ async def update_schedule(request):
         schedule = {
             'id': str(sch.schedule_id),
             'name': sch.name,
-            'processName': sch.process_name,
+            'process_name': sch.process_name,
             'type': Schedule.Type(int(sch.schedule_type)).name,
             'repeat': sch.repeat.total_seconds() if sch.repeat else 0,
             'time': (sch.time.hour * 60 * 60 + sch.time.minute * 60 + sch.time.second) if sch.time else 0,
             'day': sch.day,
-            'exclusive': sch.exclusive
+            'exclusive': sch.exclusive,
+            'enabled': sch.enabled
         }
 
         return web.json_response({'schedule': schedule})
@@ -437,7 +511,6 @@ async def delete_schedule(request):
     except (ValueError, ScheduleNotFoundError) as ex:
         raise web.HTTPNotFound(reason=str(ex))
 
-
 async def get_schedule_type(request):
     """
     Args:
@@ -454,7 +527,7 @@ async def get_schedule_type(request):
         data = {'index': _type.value, 'name': _type.name}
         results.append(data)
 
-    return web.json_response({'scheduleType': results})
+    return web.json_response({'schedule_type': results})
 
 
 #################################
@@ -484,11 +557,11 @@ async def get_task(request):
 
         task = {
             'id': str(tsk.task_id),
-            'processName': tsk.process_name,
+            'process_name': tsk.process_name,
             'state': Task.State(int(tsk.state)).name,
-            'startTime': str(tsk.start_time),
-            'endTime': str(tsk.end_time),
-            'exitCode': tsk.exit_code,
+            'start_time': str(tsk.start_time),
+            'end_time': str(tsk.end_time),
+            'exit_code': tsk.exit_code,
             'reason': tsk.reason
         }
 
@@ -546,12 +619,12 @@ async def get_tasks(request):
         for task in tasks:
             new_tasks.append(
                 {'id': str(task.task_id),
-                 'processName': task.process_name,
-                 'state': Task.State(int(task.state)).name,
-                 'startTime': str(task.start_time),
-                 'endTime': str(task.end_time),
-                 'exitCode': task.exit_code,
-                 'reason': task.reason
+                     'process_name': task.process_name,
+                     'state': Task.State(int(task.state)).name,
+                     'start_time': str(task.start_time),
+                     'end_time': str(task.end_time),
+                     'exit_code': task.exit_code,
+                     'reason': task.reason
                  }
             )
 
@@ -595,11 +668,11 @@ async def get_tasks_latest(request):
         for task in tasks:
             new_tasks.append(
                 {'id': str(task['id']),
-                 'processName': task['process_name'],
+                 'process_name': task['process_name'],
                  'state': [t.name for t in list(Task.State)][int(task['state']) - 1],
-                 'startTime': str(task['start_time']),
-                 'endTime': str(task['end_time']),
-                 'exitCode': task['exit_code'],
+                 'start_time': str(task['start_time']),
+                 'end_time': str(task['end_time']),
+                 'exit_code': task['exit_code'],
                  'reason': task['reason'],
                  'pid': task['pid']
                  }
@@ -651,4 +724,4 @@ async def get_task_state(request):
         data = {'index': _state.value, 'name': _state.name}
         results.append(data)
 
-    return web.json_response({'taskState': results})
+    return web.json_response({'task_state': results})
