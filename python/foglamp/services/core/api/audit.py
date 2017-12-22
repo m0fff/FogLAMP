@@ -62,12 +62,31 @@ async def get_audit_entries(request):
 
         curl -X GET http://localhost:8081/foglamp/audit?source=LOGGN&severity=INFORMATION&limit=10
     """
-    try:
-        limit = request.query.get('limit') if 'limit' in request.query else __DEFAULT_LIMIT
-        offset = request.query.get('skip') if 'skip' in request.query else __DEFAULT_OFFSET
-        source = request.query.get('source') if 'source' in request.query else None
-        severity = request.query.get('severity') if 'severity' in request.query else None
 
+    limit = __DEFAULT_LIMIT
+    if 'limit' in request.query:
+        try:
+            limit = int(request.query['limit'])
+        except ValueError:
+            raise web.HTTPBadRequest(reason="Limit must be an integer")
+
+    offset = __DEFAULT_OFFSET
+    if 'skip' in request.query:
+        try:
+            offset = int(request.query['skip'])
+        except ValueError:
+            raise web.HTTPBadRequest(reason="Skip/Offset must be an integer")
+
+    source = request.query.get('source') if 'source' in request.query else None
+
+    severity = None
+    if 'severity' in request.query:
+        try:
+            severity = Severity[request.query['severity'].upper()].value
+        except KeyError as ex:
+            raise web.HTTPBadRequest(reason="{} not a valid severity".format(ex))
+
+    try:
         # HACK: This way when we can more future we do not get an exponential
         # explosion of if statements
         payload = PayloadBuilder().WHERE(['1', '=', '1'])
@@ -75,7 +94,7 @@ async def get_audit_entries(request):
             payload.AND_WHERE(['code', '=', source])
 
         if severity is not None and severity != "":
-            payload.AND_WHERE(['level', '=', Severity[severity].value])
+            payload.AND_WHERE(['level', '=', severity])
 
         _and_where_payload = payload.chain_payload()
         # SELECT *, count(*) OVER() FROM log - No support yet from storage layer
@@ -111,10 +130,10 @@ async def get_audit_entries(request):
 
             res.append(r)
 
-        return web.json_response({'audit': res, 'totalCount': total_count})
+    except Exception as ex:
+        raise web.HTTPException(reason=str(ex))
 
-    except ValueError as ex:
-        raise web.HTTPNotFound(reason=str(ex))
+    return web.json_response({'audit': res, 'totalCount': total_count})
 
 
 async def get_audit_log_codes(request):

@@ -20,43 +20,43 @@ __version__ = "${VERSION}"
 BASE_URL = 'localhost:8081'
 pytestmark = pytest.mark.asyncio
 
-storage_client = StorageClient("0.0.0.0", core_management_port=44645)
+storage_client = StorageClient("0.0.0.0", core_management_port=38215)
 
 
 # TODO: remove once FOGL-510 is done
 @pytest.fixture()
 def create_init_data():
-    log = '{"end_time": "2017-07-31 13:52:31", "start_time": "2017-07-31 13:52:31", ' \
-          '"rows_removed": 0, "rows_remaining": 0, "unsent_rows_removed": 0, "total_failed_to_remove": 0}'
+    log = '{"endTime": "2017-07-31 13:52:31", "startTime": "2017-07-31 13:52:31", ' \
+          '"rowsRemoved": 0, "rowsRemaining": 0, "unsentRowsRemoved": 0, "totalFailedToRemove": 0}'
     payload = PayloadBuilder().INSERT(id='1001', code="PURGE", level='2',
                                       log=log, ts='2017-07-31 13:52:31.290372+05:30').payload()
     storage_client.insert_into_tbl("log", payload)
 
-    log = '{"end_time": "2017-07-31 13:53:31", "start_time": "2017-07-31 13:53:31", ' \
-          '"rows_removed": 0, "rows_remaining": 0, "unsent_rows_removed": 0, "total_failed_to_remove": 0}'
+    log = '{"endTime": "2017-07-31 13:53:31", "startTime": "2017-07-31 13:53:31", ' \
+          '"rowsRemoved": 0, "rowsRemaining": 0, "unsentRowsRemoved": 0, "totalFailedToRemove": 0}'
     payload = PayloadBuilder().INSERT(id='1002', code="PURGE", level='4',
                                       log=log, ts='2017-07-31 13:53:31.300745+05:30').payload()
     storage_client.insert_into_tbl("log", payload)
 
-    log = '{"end_time": "2017-07-31 13:54:31", "start_time": "2017-07-31 13:54:31", ' \
-          '"rows_removed": 0, "rows_remaining": 0, "unsent_rows_removed": 0, "total_failed_to_remove": 0}'
+    log = '{"endTime": "2017-07-31 13:54:31", "startTime": "2017-07-31 13:54:31", ' \
+          '"rowsRemoved": 0, "rowsRemaining": 0, "unsentRowsRemoved": 0, "totalFailedToRemove": 0}'
     payload = PayloadBuilder().INSERT(id='1003', code="PURGE", level='2',
                                       log=log, ts='2017-07-31 13:54:31.305959+05:30').payload()
     storage_client.insert_into_tbl("log", payload)
 
-    log = '{"end_time": "2017-07-31 13:55:31", "start_time": "2017-07-31 13:55:31", ' \
-          '"rows_removed": 0, "rows_remaining": 0, "unsent_rows_removed": 0, "total_failed_to_remove": 0}'
+    log = '{"endTime": "2017-07-31 13:55:31", "startTime": "2017-07-31 13:55:31", ' \
+          '"rowsRemoved": 0, "rowsRemaining": 0, "unsentRowsRemoved": 0, "totalFailedToRemove": 0}'
     payload = PayloadBuilder().INSERT(id='1004', code="PURGE", level='2',
                                       log=log, ts='2017-07-31 13:55:31.306996+05:30').payload()
     storage_client.insert_into_tbl("log", payload)
 
-    log = '{"end_time": "2017-07-31 14:05:54", "start_time": "2017-07-31 14:05:54"}'
+    log = '{"endTime": "2017-07-31 14:05:54", "startTime": "2017-07-31 14:05:54"}'
     payload = PayloadBuilder().INSERT(id='1005', code="LOGGN", level='4',
                                       log=log, ts='2017-07-31 14:05:54.128704+05:30').payload()
     storage_client.insert_into_tbl("log", payload)
 
-    log = '{"end_time": "2017-07-31 14:15:54", "start_time": "2017-07-31 14:15:54", ' \
-          '"rows_removed": 0, "rows_remaining": 0, "unsent_rows_removed": 0, "total_failed_to_remove": 0}'
+    log = '{"endTime": "2017-07-31 14:15:54", "startTime": "2017-07-31 14:15:54", ' \
+          '"rowsRemoved": 0, "rowsRemaining": 0, "unsentRowsRemoved": 0, "totalFailedToRemove": 0}'
     payload = PayloadBuilder().INSERT(id='1006', code="SYPRG", level='1',
                                       log=log, ts='2017-07-31 14:15:54.131013+05:30').payload()
     storage_client.insert_into_tbl("log", payload)
@@ -96,6 +96,13 @@ class TestAudit:
             elif log_severity[i]['index'] == 4:
                 assert 4 == log_severity[i]['index']
                 assert 'INFORMATION' == log_severity[i]['name']
+
+    async def test_get_audit_with_invalid_severity(self):
+        conn = http.client.HTTPConnection(BASE_URL)
+        conn.request("GET", '/foglamp/audit?severity=BLA')
+        r = conn.getresponse()
+        assert 400 == r.status
+        assert "'BLA' not a valid severity" == r.reason
 
     async def test_get_log_codes(self):
         conn = http.client.HTTPConnection(BASE_URL)
@@ -189,18 +196,6 @@ class TestAudit:
         assert 0 == len(result['audit'])
 
     @pytest.mark.usefixtures('create_init_data')
-    async def test_get_audit_with_invalid_severity(self):
-        conn = http.client.HTTPConnection(BASE_URL)
-        conn.request("GET", '/foglamp/audit?severity=BLA')
-        r = conn.getresponse()
-        assert 200 == r.status
-        r = r.read().decode()
-        conn.close()
-        result = json.loads(r)
-        # TODO: FOGL-858
-        assert "[KeyError]'BLA'" in result['error']['message']
-
-    @pytest.mark.usefixtures('create_init_data')
     async def test_get_audit_with_invalid_condition(self):
         conn = http.client.HTTPConnection(BASE_URL)
         conn.request("GET", '/foglamp/audit?source=LOGGN&severity=FATAL')
@@ -211,6 +206,20 @@ class TestAudit:
         result = json.loads(r)
         assert 0 == result['totalCount']
         assert 0 == len(result['audit'])
+
+    async def test_get_audit_limit_with_bad_data(self):
+        conn = http.client.HTTPConnection(BASE_URL)
+        conn.request("GET", '/foglamp/audit?limit=blah')
+        r = conn.getresponse()
+        assert 400 == r.status
+        assert "Limit must be an integer" == r.reason
+
+    async def test_get_audit_skip_with_bad_data(self):
+        conn = http.client.HTTPConnection(BASE_URL)
+        conn.request("GET", '/foglamp/audit?skip=blah')
+        r = conn.getresponse()
+        assert 400 == r.status
+        assert "Skip/Offset must be an integer" == r.reason
 
     # TODO: Also add negative tests for below skip defs
     @pytest.mark.skip(reason="FOGL-770 - Not implemented yet (FOGL-769)")
