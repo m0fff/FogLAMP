@@ -270,7 +270,7 @@ async def get_schedule(request):
     """
     Return the information for the given schedule from schedules table
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/schedule/ac6dd55d-f55d-44f7-8741-984604bf2384
+    :Example: curl -X GET  http://localhost:8081/foglamp/schedule/ac6dd55d-f55d-44f7-8741-984604bf2384
     """
 
     try:
@@ -307,7 +307,7 @@ async def enable_schedule(request):
     """
     Enable the given schedule from schedules table
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/schedule/enable/ac6dd55d-f55d-44f7-8741-984604bf2384
+    :Example: curl -X GET  http://localhost:8081/foglamp/schedule/enable/ac6dd55d-f55d-44f7-8741-984604bf2384
     """
 
     try:
@@ -336,7 +336,7 @@ async def disable_schedule(request):
     """
     Disable the given schedule from schedules table
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/schedule/disable/ac6dd55d-f55d-44f7-8741-984604bf2384
+    :Example: curl -X GET  http://localhost:8081/foglamp/schedule/disable/ac6dd55d-f55d-44f7-8741-984604bf2384
     """
 
     try:
@@ -365,7 +365,7 @@ async def start_schedule(request):
     """
     Starts a given schedule
 
-    :Example: curl -X POST  http://localhost:8082/foglamp/schedule/start/fd439e5b-86ba-499a-86d3-34a6e5754b5a
+    :Example: curl -X POST  http://localhost:8081/foglamp/schedule/start/fd439e5b-86ba-499a-86d3-34a6e5754b5a
     """
 
     try:
@@ -393,7 +393,7 @@ async def post_schedule(request):
     """
     Create a new schedule in schedules table
 
-    :Example: curl -d '{"type": 3, "name": "sleep30test", "process_name": "sleep30", "repeat": "45"}'  -X POST  http://localhost:8082/foglamp/schedule
+    :Example: curl -d '{"type": 3, "name": "sleep30test", "process_name": "sleep30", "repeat": "45"}'  -X POST  http://localhost:8081/foglamp/schedule
     """
 
     try:
@@ -432,7 +432,7 @@ async def update_schedule(request):
     """
     Update a schedule in schedules table
 
-    :Example: curl -d '{"type": 4, "name": "sleep30 updated", "process_name": "sleep30", "repeat": "15"}'  -X PUT  http://localhost:8082/foglamp/schedule/84fe4ea1-df9c-4c87-bb78-cab2e7d5d2cc
+    :Example: curl -d '{"type": 4, "name": "sleep30 updated", "process_name": "sleep30", "repeat": "15"}'  -X PUT  http://localhost:8081/foglamp/schedule/84fe4ea1-df9c-4c87-bb78-cab2e7d5d2cc
     """
 
     try:
@@ -491,7 +491,7 @@ async def delete_schedule(request):
     """
     Delete a schedule from schedules table
 
-    :Example: curl -X DELETE  http://localhost:8082/foglamp/schedule/dc9bfc01-066a-4cc0-b068-9c35486db87f
+    :Example: curl -X DELETE  http://localhost:8081/foglamp/schedule/dc9bfc01-066a-4cc0-b068-9c35486db87f
     """
 
     try:
@@ -519,7 +519,7 @@ async def get_schedule_type(request):
     Returns:
          an array of Schedule type enumeration key index values
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/schedule/type
+    :Example: curl -X GET  http://localhost:8081/foglamp/schedule/type
     """
 
     results = []
@@ -539,7 +539,7 @@ async def get_task(request):
     """
     Returns a task
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/task/{task_id}?name=xxx&state=xxx
+    :Example: curl -X GET  http://localhost:8081/foglamp/task/{task_id}?name=xxx&state=xxx
     """
 
     try:
@@ -574,10 +574,10 @@ async def get_tasks(request):
     """
     Returns the list of tasks
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/task
-    :Example: curl -X GET  http://localhost:8082/foglamp/task?name=xxx
-    :Example: curl -X GET  http://localhost:8082/foglamp/task?state=xxx
-    :Example: curl -X GET  http://localhost:8082/foglamp/task?name=xxx&state=xxx
+    :Example: curl -X GET  http://localhost:8081/foglamp/task
+    :Example: curl -X GET  http://localhost:8081/foglamp/task?name=xxx
+    :Example: curl -X GET  http://localhost:8081/foglamp/task?state=xxx
+    :Example: curl -X GET  http://localhost:8081/foglamp/task?name=xxx&state=xxx
     """
 
     try:
@@ -637,8 +637,8 @@ async def get_tasks_latest(request):
     """
     Returns the list of the most recent task execution for each name from tasks table
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/task/latest
-    :Example: curl -X GET  http://localhost:8082/foglamp/task/latest?name=xxx
+    :Example: curl -X GET  http://localhost:8081/foglamp/task/latest
+    :Example: curl -X GET  http://localhost:8081/foglamp/task/latest?name=xxx
     """
 
     try:
@@ -685,7 +685,7 @@ async def get_tasks_latest(request):
 async def cancel_task(request):
     """Cancel a running task from tasks table
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/task/cancel/{task_id}
+    :Example: curl -X GET  http://localhost:8081/foglamp/task/cancel/{task_id}
     """
     try:
         task_id = request.match_info.get('task_id', None)
@@ -716,7 +716,7 @@ async def get_task_state(request):
     Returns:
          an array of Task State enumeration key index values
 
-    :Example: curl -X GET  http://localhost:8082/foglamp/task/state
+    :Example: curl -X GET  http://localhost:8081/foglamp/task/state
     """
 
     results = []

@@ -65,7 +65,7 @@ class Scheduler(object):
 
     class _TaskProcess(object):
         """Tracks a running task with some flags"""
-        __slots__ = ['task_id', 'process', 'cancel_requested', 'schedule', 'start_time']
+        __slots__ = ['task_id', 'process', 'cancel_requested', 'schedule', 'start_time', 'future']
 
         def __init__(self):
             self.task_id = None  # type: uuid.UUID
@@ -75,6 +75,7 @@ class Scheduler(object):
             self.schedule = None  # Schedule._ScheduleRow
             self.start_time = None  # type: int
             """Epoch time when the task was started"""
+            self.future = None
 
     # TODO: Methods that accept a schedule and look in _schedule_executions
     # should accept schedule_execution instead. Add reference to schedule
@@ -341,7 +342,7 @@ class Scheduler(object):
                 self._logger.exception('Insert failed: %s', insert_payload)
                 # The process has started. Regardless of this error it must be waited on.
 
-        asyncio.ensure_future(self._wait_for_task_completion(task_process))
+        self._task_processes[task_id].future = asyncio.ensure_future(self._wait_for_task_completion(task_process))
 
     async def purge_tasks(self):
         """Deletes rows from the tasks table"""
@@ -537,6 +538,9 @@ class Scheduler(object):
         For exclusive schedules, this method is called after the task
         has completed.
         """
+        if schedule.enabled is False:
+            return
+
         schedule_execution = self._schedule_executions[schedule.id]
         advance_seconds = schedule.repeat_seconds
 
@@ -593,6 +597,7 @@ class Scheduler(object):
         """
         if schedule.enabled is False:
             return
+
         if schedule.type == Schedule.Type.MANUAL:
             return
 
@@ -1092,33 +1097,34 @@ class Scheduler(object):
             self._logger.info("No Task running for Schedule %s", schedule_id)
             return False
 
-        # TODO: FOGL-356 track the last time TERM was sent to each task
-        task_process.cancel_requested = time.time()
-
         schedule = task_process.schedule
 
         if schedule.enabled is False:
             self._logger.info("Schedule %s already disabled", schedule_id)
             return True
 
+        # TODO: FOGL-356 track the last time TERM was sent to each task
+        task_process.cancel_requested = time.time()
+
         # Terminate process
+        del self._schedules[schedule.id]
         try:
-            print("PID ", task_process.process.pid)
+            # KNOWN ISSUE: Does not work well with microservices e.g. COAP etc
+            # TODO: If schedule is a microservice, then deal with shutdown, unregister etc.
             task_process.process.terminate()
-            time.sleep(2)  # Allow sufficient time for STARTUP type tasks to unregister/terminate etc
+            task_future = task_process.future
+            if task_future.cancel() is True:
+                await self._wait_for_task_completion(task_process)
+            self._logger.info(
+                "Disabled Schedule '%s/%s' process '%s' task %s pid %s\n%s",
+                schedule.name,
+                schedule.id,
+                schedule.process_name,
+                task_id,
+                task_process.process.pid,
+                self._process_scripts[schedule.process_name])
         except ProcessLookupError:
             pass  # Process has terminated
-
-        # TODO: If schedule is a service, then deal with microservices shutdown, unregister etc.
-
-        self._logger.info(
-            "Disabled Schedule '%s/%s' process '%s' task %s pid %s\n%s",
-            schedule.name,
-            schedule.id,
-            schedule.process_name,
-            task_id,
-            task_process.process.pid,
-            self._process_scripts[schedule.process_name])
 
         # Disable Schedule
         # We need to recreate the _ScheduleRow for just one change - enabled = False. This is required as _ScheduleRow
@@ -1148,6 +1154,7 @@ class Scheduler(object):
         except Exception:
             self._logger.exception('Update failed: %s', update_payload)
             raise RuntimeError('Update failed: %s', update_payload)
+        await asyncio.sleep(1)
 
         return True
 
@@ -1199,6 +1206,7 @@ class Scheduler(object):
             enabled=True,
             process_name=schedule.process_name)
 
+        del self._schedules[schedule.schedule_id]
         self._schedules[schedule.schedule_id] = schedule_row
 
         # Update database
@@ -1212,10 +1220,10 @@ class Scheduler(object):
         except Exception:
             self._logger.exception('Update failed: %s', update_payload)
             raise RuntimeError('Update failed: %s', update_payload)
+        await asyncio.sleep(1)
 
         # Start schedule
         await self.queue_task(schedule_id)
-
         self._logger.info(
             "Enabled Schedule '%s/%s' process '%s'\n",
             schedule.name,

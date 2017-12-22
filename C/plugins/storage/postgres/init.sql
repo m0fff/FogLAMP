@@ -941,7 +941,7 @@ values ('716a16ea-c736-490b-86d5-10204585ca8c', 'device', 'CC2650ASYN', 1,
 -- Start the Poll mode device server at start-up
 insert into foglamp.schedules(id, schedule_name, process_name, schedule_type,
 schedule_interval, exclusive, enabled)
-values ('543a59ce-a9ca-11e7-abc4-cec278b6b50a', 'device', 'POLL', 1,
+values ('543a59ce-a9ca-11e7-abc4-cec278b6b50b', 'device', 'POLL', 1,
 '0:0', true, false);
 
 
